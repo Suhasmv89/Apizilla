@@ -17,20 +17,40 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
+      - name: Find OpenAPI/Swagger file
+        id: find_spec
+        run: |
+          SPEC=$(git ls-files --exclude-standard '**/openapi*.yaml' '**/openapi*.yml' '**/swagger*.json' | head -n 1 || true)
+          if [ -z "$SPEC" ]; then
+            echo "no_spec=1" >> $GITHUB_OUTPUT
+            echo "spec_path=" >> $GITHUB_OUTPUT
+          else
+            echo "no_spec=0" >> $GITHUB_OUTPUT
+            echo "spec_path=$SPEC" >> $GITHUB_OUTPUT
+          fi
+
       - name: Call Custom GPT for Validation
+        if: steps.find_spec.outputs.no_spec == '0'
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          SYSTEM_PROMPT='You are "API Auditor". Respond only with JSON. Validate the given OpenAPI spec against company standards.'
-          USER_PROMPT="Validate this API spec: $(cat openapi.yaml)"
+          SPEC_PATH="${{ steps.find_spec.outputs.spec_path }}"
+          echo "Using spec: $SPEC_PATH"
+          # Read file and JSON-escape it
+          SPEC_CONTENT=$(jq -Rs '.' < "$SPEC_PATH")
 
+          SYSTEM_PROMPT='You are "API Auditor". You only respond with valid JSON. Validate the provided OpenAPI/Swagger spec against company API standards and output JSON with keys: overall_status (pass/fail/error), block_merge (true/false), issues (array), suggested_pr_comment (string). If parsing fails, return overall_status:"error" and errors:[]'
+
+          USER_PROMPT="File: $SPEC_PATH\n\nSpec content:\n$SPEC_CONTENT"
+
+          # Replace the model value with your Custom GPT ID (example format: gpt://<your-id>)
           PAYLOAD=$(jq -nc --arg sys "$SYSTEM_PROMPT" --arg usr "$USER_PROMPT" '{
-            model: "gpt://APPZilla",   # 👈 replace with your Custom GPT ID
+            model: "gpt://REPLACE_WITH_YOUR_CUSTOM_GPT_ID",
             messages: [
               {role:"system", content:$sys},
               {role:"user", content:$usr}
             ],
-            max_tokens: 1500,
+            max_tokens: 1800,
             temperature: 0
           }')
 
@@ -40,7 +60,36 @@ jobs:
             -d "$PAYLOAD")
 
           echo "$RESPONSE" > llm_raw.json
-          jq -r '.choices[0].message.content' llm_raw.json > llm_output.json
+          # Extract assistant text; some responses include markdown - the workflow requires valid JSON
+          jq -r '.choices[0].message.content // ""' llm_raw.json > llm_output.json || true
 
-          echo "GPT Review Output:"
-          cat llm_output.json
+          # Validate assistant produced JSON
+          if ! jq -e '.' llm_output.json >/dev/null 2>&1; then
+            echo "ERROR: assistant output is not valid JSON. See llm_raw.json for full response."
+            cat llm_raw.json
+            exit 1
+          fi
+
+      - name: Post PR comment with GPT review
+        if: steps.find_spec.outputs.no_spec == '0'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            **Automated GPT API Review**
+            _This is an automated validation of the OpenAPI/Swagger file._
+            ```json
+            $(cat llm_output.json)
+            ```
+
+      - name: Fail if assistant requested block_merge=true
+        if: steps.find_spec.outputs.no_spec == '0'
+        run: |
+          BLOCK=$(jq -r '.block_merge // false' llm_output.json)
+          if [ "$BLOCK" = "true" ]; then
+            echo "Assistant requested block_merge=true; failing the job."
+            exit 1
+          else
+            echo "No block requested."
+          fi
