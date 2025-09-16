@@ -1,9 +1,46 @@
-PAYLOAD=$(jq -nc --arg sys "$SYSTEM_PROMPT" --arg usr "$USER_PROMPT" '{
-  model: "gpt://APIZilla",    # 👈 using your Custom GPT ID
-  messages: [
-    {role:"system", content:$sys},
-    {role:"user", content:$usr}
-  ],
-  max_tokens: 1500,
-  temperature: 0
-}')
+name: GPT Swagger Review
+
+on:
+  pull_request:
+    paths:
+      - '**/openapi*.yaml'
+      - '**/openapi*.yml'
+      - '**/swagger*.json'
+
+jobs:
+  gpt-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Call Custom GPT for Validation
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          SYSTEM_PROMPT='You are "API Auditor". Respond only with JSON. Validate the given OpenAPI spec against company standards.'
+          USER_PROMPT="Validate this API spec: $(cat openapi.yaml)"
+
+          PAYLOAD=$(jq -nc --arg sys "$SYSTEM_PROMPT" --arg usr "$USER_PROMPT" '{
+            model: "gpt://APPZilla",   # 👈 replace with your Custom GPT ID
+            messages: [
+              {role:"system", content:$sys},
+              {role:"user", content:$usr}
+            ],
+            max_tokens: 1500,
+            temperature: 0
+          }')
+
+          RESPONSE=$(curl -s -X POST "https://api.openai.com/v1/chat/completions" \
+            -H "Authorization: Bearer $OPENAI_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+
+          echo "$RESPONSE" > llm_raw.json
+          jq -r '.choices[0].message.content' llm_raw.json > llm_output.json
+
+          echo "GPT Review Output:"
+          cat llm_output.json
