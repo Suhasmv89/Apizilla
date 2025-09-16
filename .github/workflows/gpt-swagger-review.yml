@@ -45,7 +45,7 @@ jobs:
 
           # Replace the model value with your Custom GPT ID (example format: gpt://<your-id>)
           PAYLOAD=$(jq -nc --arg sys "$SYSTEM_PROMPT" --arg usr "$USER_PROMPT" '{
-            model: "gpt://APPZilla",
+            model: "gpt://g-68c8b6dae1308191a9a5d3608c757fe0-apizilla",
             messages: [
               {role:"system", content:$sys},
               {role:"user", content:$usr}
