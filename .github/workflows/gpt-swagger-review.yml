@@ -1,0 +1,9 @@
+PAYLOAD=$(jq -nc --arg sys "$SYSTEM_PROMPT" --arg usr "$USER_PROMPT" '{
+  model: "gpt://APIZilla",    # 👈 using your Custom GPT ID
+  messages: [
+    {role:"system", content:$sys},
+    {role:"user", content:$usr}
+  ],
+  max_tokens: 1500,
+  temperature: 0
+}')
