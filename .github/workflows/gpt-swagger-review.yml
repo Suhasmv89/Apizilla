@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # optional default model id; replace with your actual Custom GPT ID
-      CUSTOM_GPT_ID: gpt://g-68c8b6dae1308191a9a5d3608c757fe0-apizilla
+      CUSTOM_GPT_ID: g-68c8b6dae1308191a9a5d3608c757fe0-apizilla
     steps:
       - name: Checkout
         uses: actions/checkout@v4
